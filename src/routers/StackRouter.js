@@ -1,5 +1,6 @@
 /* @flow */
 
+import areEqual from 'fbjs/lib/areEqual';
 import pathToRegexp from 'path-to-regexp';
 
 import NavigationActions from '../NavigationActions';
@@ -183,6 +184,17 @@ export default (
             routeName: action.routeName,
           };
         }
+
+        // DUPLICATE ROUTING FIX
+        const index = state.routes.length - 1;
+        const lastRoute = state.routes[index];
+
+        if (action.routeName === lastRoute.routeName
+          && areEqual(action.params, lastRoute.params)) {
+          route.key = lastRoute.key;
+          return StateUtils.replaceAtIndex(state, index, route);
+        }
+
         return StateUtils.push(state, route);
       }
 
