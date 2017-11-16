@@ -11,7 +11,6 @@ import validateRouteConfigMap from './validateRouteConfigMap';
 import getScreenConfigDeprecated from './getScreenConfigDeprecated';
 
 import type {
-  NavigationAction,
   NavigationComponent,
   NavigationNavigateAction,
   NavigationRouter,
@@ -22,6 +21,8 @@ import type {
   NavigationStackAction,
   NavigationStackRouterConfig,
   NavigationStackScreenOptions,
+  NavigationRoute,
+  NavigationStateRoute,
 } from '../TypeDefinition';
 
 const uniqueBaseId = `id-${Date.now()}`;
@@ -30,10 +31,22 @@ function _getUuid() {
   return `${uniqueBaseId}-${uuidCount++}`;
 }
 
+function isEmpty(obj: ?Object): boolean {
+  if (!obj) return true;
+  for (let key in obj) {
+    return false;
+  }
+  return true;
+}
+
 export default (
   routeConfigs: NavigationRouteConfigMap,
   stackConfig: NavigationStackRouterConfig = {}
-): NavigationRouter<*, *, NavigationStackScreenOptions> => {
+): NavigationRouter<
+  NavigationState,
+  NavigationStackAction,
+  NavigationStackScreenOptions
+> => {
   // Fail fast on invalid route definitions
   validateRouteConfigMap(routeConfigs);
 
@@ -91,11 +104,9 @@ export default (
     },
 
     getStateForAction(
-      passedAction: NavigationStackAction,
+      action: NavigationStackAction,
       state: ?NavigationState
-    ) {
-      const action = NavigationActions.mapDeprecatedActionAndWarn(passedAction);
-
+    ): ?NavigationState {
       // Set up the initial state if needed
       if (!state) {
         let route = {};
@@ -125,10 +136,10 @@ export default (
         const params = (route.params ||
           action.params ||
           initialRouteParams) && {
-            ...(route.params || {}),
-            ...(action.params || {}),
-            ...(initialRouteParams || {}),
-          };
+          ...(route.params || {}),
+          ...(action.params || {}),
+          ...(initialRouteParams || {}),
+        };
         route = {
           ...route,
           routeName: initialRouteName,
@@ -234,9 +245,9 @@ export default (
       }
 
       if (action.type === NavigationActions.SET_PARAMS) {
+        const key = action.key;
         const lastRoute = state.routes.find(
-          /* $FlowFixMe */
-          (route: *) => route.key === action.key
+          (route: NavigationRoute) => route.key === key
         );
         if (lastRoute) {
           const params = {
@@ -284,11 +295,11 @@ export default (
       }
 
       if (action.type === NavigationActions.BACK) {
+        const key = action.key;
         let backRouteIndex = null;
-        if (action.key) {
+        if (key) {
           const backRoute = state.routes.find(
-            /* $FlowFixMe */
-            (route: *) => route.key === action.key
+            (route: NavigationRoute) => route.key === key
           );
           /* $FlowFixMe */
           backRouteIndex = state.routes.indexOf(backRoute);
@@ -318,9 +329,11 @@ export default (
       let path = subPath;
       let params = route.params;
       if (screen && screen.router) {
+        // $FlowFixMe there's no way type the specific shape of the nav state
+        const stateRoute: NavigationStateRoute = route;
         // If it has a router it's a navigator.
         // If it doesn't have router it's an ordinary React component.
-        const child = screen.router.getPathAndParamsForState(route);
+        const child = screen.router.getPathAndParamsForState(stateRoute);
         path = subPath ? `${subPath}/${child.path}` : child.path;
         params = child.params ? { ...params, ...child.params } : params;
       }
@@ -330,7 +343,10 @@ export default (
       };
     },
 
-    getActionForPathAndParams(pathToResolve: string): ?NavigationAction {
+    getActionForPathAndParams(
+      pathToResolve: string,
+      inputParams: ?NavigationParams
+    ): ?NavigationStackAction {
       // If the path is empty (null or empty string)
       // just return the initial route action
       if (!pathToResolve) {
@@ -369,26 +385,27 @@ export default (
       // get the action for the path AFTER the matched path for this
       // router
       let nestedAction;
+      let nestedQueryString = queryString ? '?' + queryString : '';
       if (childRouters[matchedRouteName]) {
         nestedAction = childRouters[matchedRouteName].getActionForPathAndParams(
           /* $FlowFixMe */
-          pathMatch.slice(pathMatchKeys.length).join('/')
+          pathMatch.slice(pathMatchKeys.length).join('/') + nestedQueryString
         );
       }
 
       // reduce the items of the query string. any query params may
       // be overridden by path params
-      const queryParams = (queryString || '')
-        .split('&')
-        .reduce((result: *, item: string) => {
-          if (item !== '') {
-            const nextResult = result || {};
-            const [key, value] = item.split('=');
-            nextResult[key] = value;
-            return nextResult;
-          }
-          return result;
-        }, null);
+      const queryParams = !isEmpty(inputParams)
+        ? inputParams
+        : (queryString || '').split('&').reduce((result: *, item: string) => {
+            if (item !== '') {
+              const nextResult = result || {};
+              const [key, value] = item.split('=');
+              nextResult[key] = value;
+              return nextResult;
+            }
+            return result;
+          }, null);
 
       // reduce the matched pieces of the path into the params
       // of the route. `params` is null if there are no params.
